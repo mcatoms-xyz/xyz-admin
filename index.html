@@ -11,6 +11,8 @@
   *{ box-sizing:border-box; }
   html,body{ margin:0; height:100%; background:var(--ink); color:var(--text);
              font-family:'Trebuchet MS','Segoe UI',system-ui,sans-serif; }
+
+  /* ---------- gate ---------- */
   #gate{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
   .card{ width:100%; max-width:420px; background:var(--panel); border:1px solid var(--line);
          border-radius:14px; padding:28px 26px; }
@@ -31,6 +33,8 @@
        background:rgba(61,220,151,.10); border:1px solid rgba(61,220,151,.35);
        color:var(--ok); font-size:13.5px; line-height:1.5; }
   .foot{ margin-top:18px; font-size:11.5px; color:var(--dim); line-height:1.5; }
+
+  /* ---------- shell ---------- */
   #shell{ display:none; height:100vh; flex-direction:column; }
   .bar{ display:flex; align-items:center; gap:12px; padding:8px 14px;
         background:var(--panel); border-bottom:1px solid var(--line); flex:0 0 auto; }
@@ -44,6 +48,8 @@
 </style>
 </head>
 <body>
+
+<!-- ============ GATE ============ -->
 <div id="gate">
   <div class="card">
     <div class="mark">XYZ</div>
@@ -56,10 +62,12 @@
     </form>
     <div class="err" id="gerr"></div>
     <div class="ok" id="gok"></div>
-    <p class="foot">Nothing on this page loads until you are signed in. The dashboard itself is
+    <p class="foot">Nothing on this page loads until you're signed in. The dashboard itself is
     stored privately and is only released to a verified staff session.</p>
   </div>
 </div>
+
+<!-- ============ SHELL ============ -->
 <div id="shell">
   <div class="bar">
     <div class="dot"></div>
@@ -71,24 +79,37 @@
   <div id="loading">Fetching dashboard…</div>
   <iframe id="frame" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" style="display:none"></iframe>
 </div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
-/* This file is PUBLIC and contains no company data. It is an empty shell.
-   The dashboard lives in the PRIVATE Supabase bucket xyz-admin, whose RLS
-   policy calls public.is_xyz_staff() — that reads the email from the SIGNED
-   JWT and requires @xyzgamelabs.com. The anon key cannot read the bucket. */
+/* ==================================================================
+   XYZ Game Labs — internal dashboard, staff gate.
+
+   HOW THE LOCK ACTUALLY WORKS (this matters):
+   This file is public. It contains no company data — it is an empty
+   shell. The dashboard lives in the PRIVATE Supabase storage bucket
+   `xyz-admin`, whose row-level policy calls public.is_xyz_staff().
+   That function reads the caller's email out of the SIGNED JWT and
+   requires @xyzgamelabs.com. The anon key cannot read the bucket.
+   Deleting the JavaScript checks below in devtools gets you an empty
+   page and a 400 from storage.
+   ================================================================== */
 const SUPABASE_URL    = "https://ingppffghqsajdrgahcm.supabase.co";
 const PUBLISHABLE_KEY = "sb_publishable__41r1k47DJnKmtbmVNqYKQ_yOL98eTd";
 const STAFF_DOMAIN    = "@xyzgamelabs.com";
 const BUCKET          = "xyz-admin";
 const OBJECT          = "dashboard.html";
+
 const sb = window.supabase.createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
   auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }
 });
+
 const $ = function(id){ return document.getElementById(id); };
 function isStaff(e){ return !!e && e.toLowerCase().endsWith(STAFF_DOMAIN); }
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){
   return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+/* ---------------- auth ---------------- */
 $("gateForm").addEventListener("submit", async function(e){
   e.preventDefault();
   const email = $("email").value.trim();
@@ -110,11 +131,14 @@ $("gateForm").addEventListener("submit", async function(e){
   ok.style.display = "block";
   ok.innerHTML = "Link sent to <b>"+esc(email)+"</b>.<br>Open it on this device. It expires in an hour.";
 });
+
 $("signOutBtn").addEventListener("click", async function(){
   await sb.auth.signOut();
   location.href = location.origin + location.pathname;
 });
 $("reloadBtn").addEventListener("click", loadDashboard);
+
+/* ---------------- boot ---------------- */
 async function boot(){
   const { data } = await sb.auth.getSession();
   const session = data ? data.session : null;
@@ -122,10 +146,11 @@ async function boot(){
   if(session && isStaff(email)){ reveal(email); return; }
   if(session && !isStaff(email)){
     await sb.auth.signOut();
-    $("gerr").textContent = "That account is not an @xyzgamelabs.com address.";
+    $("gerr").textContent = "That account isn't an @xyzgamelabs.com address.";
   }
   $("email").focus();
 }
+
 function reveal(email){
   $("gate").style.display  = "none";
   $("shell").style.display = "flex";
@@ -133,22 +158,59 @@ function reveal(email){
   if(history.replaceState) history.replaceState(null,"",location.origin+location.pathname);
   loadDashboard();
 }
+
+/* ---------------- the gated payload ---------------- */
 async function loadDashboard(){
   const load = $("loading"), frame = $("frame");
   frame.style.display = "none";
   load.style.display  = "block";
   load.textContent    = "Fetching dashboard…";
+
   const { data, error } = await sb.storage.from(BUCKET).download(OBJECT);
   if(error){
     load.innerHTML = "Could not load the dashboard.<br><small>" + esc(error.message) +
-      "</small><br><br><small>If this says Object not found, the dashboard has not been " +
+      "</small><br><br><small>If this says 'Object not found', the dashboard has not been " +
       "uploaded to the <b>" + esc(BUCKET) + "</b> bucket yet.</small>";
     return;
   }
   const html = await data.text();
   frame.srcdoc = html;
-  frame.onload = function(){ load.style.display = "none"; frame.style.display = "block"; };
+  frame.onload = function(){
+    load.style.display = "none";
+    frame.style.display = "block";
+    pushSessionToFrame();
+  };
 }
+
+/* ------------- hand the session down to the dashboard ----------------------
+   The dashboard's Inbox writes to Supabase as the signed-in user. It cannot
+   reliably dig the session out of localStorage itself — supabase-js base64s the
+   value in some versions and chunks long sessions across .0/.1 keys, and the
+   first build of the Inbox shipped permanently signed-out because of it.
+   So the gate, which already holds a real client, hands the token over.
+   Same-origin srcdoc iframe, so this never crosses an origin boundary.        */
+async function pushSessionToFrame(){
+  const frame = $("frame");
+  if(!frame || !frame.contentWindow) return;
+  const { data } = await sb.auth.getSession();
+  const session = data ? data.session : null;
+  if(!session || !isStaff(session.user && session.user.email)) return;
+  frame.contentWindow.postMessage({
+    type:  "xyz-session",
+    token: session.access_token,
+    email: session.user.email
+  }, "*");
+}
+
+// The dashboard asks on boot too, in case it finished loading before we pushed.
+window.addEventListener("message", function(e){
+  if(e.data && e.data.type === "xyz-session-request") pushSessionToFrame();
+});
+
+// Supabase rotates the access token roughly hourly. Without this the Inbox
+// would quietly start 401ing on a long-open tab.
+sb.auth.onAuthStateChange(function(){ pushSessionToFrame(); });
+
 boot();
 </script>
 </body>
