@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<title>XYZ Game Labs — Internal</title>
+<style>
+  :root{ --blueprint:#3769BE; --ink:#12161c; --panel:#1a2029; --line:#2a3340;
+         --text:#e8edf4; --dim:#93a1b3; --ok:#3ddc97; --bad:#ff6b6b; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--ink); color:var(--text);
+             font-family:'Trebuchet MS','Segoe UI',system-ui,sans-serif; }
+  #gate{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+  .card{ width:100%; max-width:420px; background:var(--panel); border:1px solid var(--line);
+         border-radius:14px; padding:28px 26px; }
+  .mark{ width:44px; height:44px; border-radius:10px; background:var(--blueprint);
+         display:flex; align-items:center; justify-content:center; font-weight:800;
+         font-size:19px; letter-spacing:.5px; margin-bottom:16px; }
+  h1{ font-size:19px; margin:0 0 6px; }
+  .sub{ color:var(--dim); font-size:13.5px; line-height:1.5; margin:0 0 18px; }
+  label{ display:block; font-size:12px; color:var(--dim); margin-bottom:6px; }
+  input{ width:100%; padding:11px 12px; border-radius:9px; border:1px solid var(--line);
+         background:#121821; color:var(--text); font-size:15px; }
+  input:focus{ outline:none; border-color:var(--blueprint); }
+  button{ width:100%; margin-top:12px; padding:11px 12px; border:0; border-radius:9px;
+          background:var(--blueprint); color:#fff; font-size:15px; font-weight:700; cursor:pointer; }
+  button:disabled{ opacity:.55; cursor:default; }
+  .err{ color:var(--bad); font-size:13px; margin-top:10px; min-height:1em; }
+  .ok{ display:none; margin-top:12px; padding:11px 12px; border-radius:9px;
+       background:rgba(61,220,151,.10); border:1px solid rgba(61,220,151,.35);
+       color:var(--ok); font-size:13.5px; line-height:1.5; }
+  .foot{ margin-top:18px; font-size:11.5px; color:var(--dim); line-height:1.5; }
+  #shell{ display:none; height:100vh; flex-direction:column; }
+  .bar{ display:flex; align-items:center; gap:12px; padding:8px 14px;
+        background:var(--panel); border-bottom:1px solid var(--line); flex:0 0 auto; }
+  .bar .who{ font-size:12.5px; color:var(--dim); margin-left:auto; }
+  .bar button{ width:auto; margin:0; padding:6px 12px; font-size:12.5px; font-weight:600;
+               background:transparent; border:1px solid var(--line); color:var(--text); }
+  .bar .brand{ font-size:13px; font-weight:800; letter-spacing:.4px; }
+  .dot{ width:8px; height:8px; border-radius:50%; background:var(--ok); }
+  #frame{ flex:1 1 auto; width:100%; border:0; background:#fff; }
+  #loading{ padding:40px; text-align:center; color:var(--dim); font-size:14px; }
+</style>
+</head>
+<body>
+<div id="gate">
+  <div class="card">
+    <div class="mark">XYZ</div>
+    <h1>Internal dashboard</h1>
+    <p class="sub">Staff only. Enter your <b>@xyzgamelabs.com</b> address and we'll email you a sign-in link.</p>
+    <form id="gateForm" autocomplete="on">
+      <label for="email">Work email</label>
+      <input id="email" type="email" placeholder="you@xyzgamelabs.com" required autocomplete="email">
+      <button id="gateBtn" type="submit">Email me a link</button>
+    </form>
+    <div class="err" id="gerr"></div>
+    <div class="ok" id="gok"></div>
+    <p class="foot">Nothing on this page loads until you are signed in. The dashboard itself is
+    stored privately and is only released to a verified staff session.</p>
+  </div>
+</div>
+<div id="shell">
+  <div class="bar">
+    <div class="dot"></div>
+    <div class="brand">XYZ GAME LABS · INTERNAL</div>
+    <div class="who">Signed in as <b id="whoami">—</b></div>
+    <button id="reloadBtn" type="button">Reload</button>
+    <button id="signOutBtn" type="button">Sign out</button>
+  </div>
+  <div id="loading">Fetching dashboard…</div>
+  <iframe id="frame" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" style="display:none"></iframe>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+/* This file is PUBLIC and contains no company data. It is an empty shell.
+   The dashboard lives in the PRIVATE Supabase bucket xyz-admin, whose RLS
+   policy calls public.is_xyz_staff() — that reads the email from the SIGNED
+   JWT and requires @xyzgamelabs.com. The anon key cannot read the bucket. */
+const SUPABASE_URL    = "https://ingppffghqsajdrgahcm.supabase.co";
+const PUBLISHABLE_KEY = "sb_publishable__41r1k47DJnKmtbmVNqYKQ_yOL98eTd";
+const STAFF_DOMAIN    = "@xyzgamelabs.com";
+const BUCKET          = "xyz-admin";
+const OBJECT          = "dashboard.html";
+const sb = window.supabase.createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
+  auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }
+});
+const $ = function(id){ return document.getElementById(id); };
+function isStaff(e){ return !!e && e.toLowerCase().endsWith(STAFF_DOMAIN); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+$("gateForm").addEventListener("submit", async function(e){
+  e.preventDefault();
+  const email = $("email").value.trim();
+  const err = $("gerr"), ok = $("gok"), btn = $("gateBtn");
+  err.textContent = ""; ok.style.display = "none";
+  if(!isStaff(email)){ err.textContent = "That has to be an @xyzgamelabs.com address."; return; }
+  btn.disabled = true; btn.textContent = "Sending…";
+  const { error } = await sb.auth.signInWithOtp({
+    email: email,
+    options:{ emailRedirectTo: location.origin + location.pathname }
+  });
+  btn.disabled = false; btn.textContent = "Email me a link";
+  if(error){
+    err.textContent = /rate|limit|seconds/i.test(error.message)
+      ? "Too many sign-in emails. Built-in mail is capped at 2 per hour. Wait a bit, or use the link already in your inbox."
+      : error.message;
+    return;
+  }
+  ok.style.display = "block";
+  ok.innerHTML = "Link sent to <b>"+esc(email)+"</b>.<br>Open it on this device. It expires in an hour.";
+});
+$("signOutBtn").addEventListener("click", async function(){
+  await sb.auth.signOut();
+  location.href = location.origin + location.pathname;
+});
+$("reloadBtn").addEventListener("click", loadDashboard);
+async function boot(){
+  const { data } = await sb.auth.getSession();
+  const session = data ? data.session : null;
+  const email = session && session.user ? session.user.email : null;
+  if(session && isStaff(email)){ reveal(email); return; }
+  if(session && !isStaff(email)){
+    await sb.auth.signOut();
+    $("gerr").textContent = "That account is not an @xyzgamelabs.com address.";
+  }
+  $("email").focus();
+}
+function reveal(email){
+  $("gate").style.display  = "none";
+  $("shell").style.display = "flex";
+  $("whoami").textContent  = email;
+  if(history.replaceState) history.replaceState(null,"",location.origin+location.pathname);
+  loadDashboard();
+}
+async function loadDashboard(){
+  const load = $("loading"), frame = $("frame");
+  frame.style.display = "none";
+  load.style.display  = "block";
+  load.textContent    = "Fetching dashboard…";
+  const { data, error } = await sb.storage.from(BUCKET).download(OBJECT);
+  if(error){
+    load.innerHTML = "Could not load the dashboard.<br><small>" + esc(error.message) +
+      "</small><br><br><small>If this says Object not found, the dashboard has not been " +
+      "uploaded to the <b>" + esc(BUCKET) + "</b> bucket yet.</small>";
+    return;
+  }
+  const html = await data.text();
+  frame.srcdoc = html;
+  frame.onload = function(){ load.style.display = "none"; frame.style.display = "block"; };
+}
+boot();
+</script>
+</body>
+</html>
