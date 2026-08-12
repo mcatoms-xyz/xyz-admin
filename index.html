@@ -121,14 +121,35 @@ const PAGES = [
   { slug:"backers",    file:"backer-command.html",         label:"Backers",    nav:true },
   { slug:"roadmap",    file:"release-roadmap.html",        label:"AR Roadmap", nav:true },
   { slug:"backer-lookup", file:"backer-lookup.html",       label:"Backer lookup", nav:false },
+  // `prefix` = this page is a small SITE. Any .html under its folder is servable,
+  // addressed as #/<slug>/<path-without-.html>, e.g. #/hindsight/world. Without
+  // this every one of the bible's 13 sibling pages would need its own registry
+  // row, and any page nobody remembered to add would silently render as a dead link.
+  { slug:"hindsight",  file:"hindsight/bible/index.html",  label:"Hindsight",  nav:true, prefix:"hindsight/bible/" },
+  { slug:"hs-prototype", file:"hindsight/prototype.html",  label:"Hindsight prototype", nav:false },
+  { slug:"hs-shorts",  file:"hindsight/shorts.html",       label:"Hindsight shorts",    nav:false },
+  { slug:"hs-catchup", file:"hindsight/rick-catchup.html", label:"Rick catch-up",       nav:false },
 ];
 const DEFAULT_SLUG = "dashboard";
 function pageFor(slug){
+  if(!slug) return null;
   for(var i=0;i<PAGES.length;i++){ if(PAGES[i].slug===slug) return PAGES[i]; }
+  // sub-page of a prefix site: "hindsight/world" -> hindsight/bible/world.html
+  var cut = slug.indexOf("/");
+  if(cut > 0){
+    var root = slug.slice(0, cut), rest = slug.slice(cut + 1);
+    for(var j=0;j<PAGES.length;j++){
+      var pg = PAGES[j];
+      // reject traversal and anything that is not a plain relative path
+      if(pg.slug === root && pg.prefix && /^[a-z0-9._\/-]+$/i.test(rest) && rest.indexOf("..") === -1){
+        return { slug: slug, file: pg.prefix + rest + ".html", label: pg.label, nav:false, prefix: pg.prefix, parent: root };
+      }
+    }
+  }
   return null;
 }
 function currentSlug(){
-  var m = /^#\/([a-z0-9-]+)/i.exec(location.hash || "");
+  var m = /^#\/([a-z0-9._\/-]+)/i.exec(location.hash || "");
   return (m && pageFor(m[1])) ? m[1] : DEFAULT_SLUG;
 }
 
@@ -199,10 +220,111 @@ function reveal(email){
 /* ---------------- the gated payload ---------------- */
 function renderNav(){
   const nav = $("pagenav"); if(!nav) return;
-  const cur = currentSlug();
+  const cur  = currentSlug();
+  const root = cur.indexOf("/") > 0 ? cur.slice(0, cur.indexOf("/")) : cur;
   nav.innerHTML = PAGES.filter(function(p){ return p.nav; }).map(function(p){
-    return '<a href="#/'+p.slug+'"'+(p.slug===cur?' class="on"':'')+'>'+esc(p.label)+'</a>';
+    return '<a href="#/'+p.slug+'"'+(p.slug===root?' class="on"':'')+'>'+esc(p.label)+'</a>';
   }).join("");
+}
+
+/* ---------- making a small SITE work inside a sandboxed frame ---------------
+   srcdoc content has no base URL, so a page like the Hindsight bible — 14
+   interlinked pages sharing a stylesheet, a script and ~35 images — resolves
+   every relative reference against admin.xyzgamelabs.com and 404s the lot.
+   The bucket is private, so the browser cannot fetch those assets itself
+   either. So before injecting a page we resolve its own references:
+     stylesheet + script  -> downloaded and INLINED
+     images               -> individually SIGNED URLs (each carries its token)
+     links to .html       -> rewritten to ask the gate to navigate
+   Anything already absolute, anchored, mailto: or data: is left alone.       */
+function dirOf(objPath){
+  const i = objPath.lastIndexOf("/");
+  return i === -1 ? "" : objPath.slice(0, i + 1);
+}
+function slugForFile(file){
+  for(var i=0;i<PAGES.length;i++){ if(PAGES[i].file === file) return PAGES[i].slug; }
+  for(var j=0;j<PAGES.length;j++){
+    var pg = PAGES[j];
+    if(pg.prefix && file.indexOf(pg.prefix) === 0 && /\.html$/i.test(file)){
+      return pg.slug + "/" + file.slice(pg.prefix.length).replace(/\.html$/i, "");
+    }
+  }
+  return null;
+}
+function isBare(u){
+  return u && !/^(https?:|\/\/|#|mailto:|data:|javascript:)/i.test(u);
+}
+async function resolveAssets(html, objPath){
+  const base = dirOf(objPath);
+  const doc  = new DOMParser().parseFromString(html, "text/html");
+
+  // stylesheets + scripts -> inline
+  const inlines = [];
+  doc.querySelectorAll('link[rel="stylesheet"][href]').forEach(function(el){
+    if(isBare(el.getAttribute("href"))) inlines.push({ el: el, kind: "css", src: el.getAttribute("href") });
+  });
+  doc.querySelectorAll("script[src]").forEach(function(el){
+    if(isBare(el.getAttribute("src"))) inlines.push({ el: el, kind: "js", src: el.getAttribute("src") });
+  });
+  for(const it of inlines){
+    try{
+      const { data } = await sb.storage.from(BUCKET).download(base + it.src);
+      if(!data) continue;
+      const text = await data.text();
+      const tag  = doc.createElement(it.kind === "css" ? "style" : "script");
+      tag.textContent = text;
+      it.el.replaceWith(tag);
+    }catch(e){ /* leave the tag; the page degrades rather than fails */ }
+  }
+
+  // images -> signed URLs
+  const imgs = [];
+  doc.querySelectorAll("img[src]").forEach(function(el){
+    if(isBare(el.getAttribute("src"))) imgs.push(el);
+  });
+  if(imgs.length){
+    const paths = imgs.map(function(el){ return base + el.getAttribute("src"); });
+    try{
+      const { data } = await sb.storage.from(BUCKET).createSignedUrls(paths, 3600);
+      if(data) data.forEach(function(row, i){ if(row && row.signedUrl) imgs[i].src = row.signedUrl; });
+    }catch(e){ /* images just won't render */ }
+  }
+
+  // internal links -> gate navigation
+  doc.querySelectorAll("a[href]").forEach(function(a){
+    const h = a.getAttribute("href");
+    if(!isBare(h)) return;
+    const clean = h.split("#")[0].split("?")[0];
+    if(/\.html$/i.test(clean)){
+      // a link back out to the dashboard, e.g. ../../xyz-dashboard.html#hindsight
+      const slug = /xyz-dashboard\.html$/i.test(clean)
+        ? DEFAULT_SLUG
+        : slugForFile(new URL(base + clean, "https://x/").pathname.slice(1));
+      if(slug){
+        a.setAttribute("href", "#");
+        a.setAttribute("data-xyz-go", slug);
+      }else{
+        a.setAttribute("href", "#");
+        a.setAttribute("title", "Not published to the portal");
+        a.style.opacity = ".55";
+      }
+    }else{
+      // non-HTML local file (a .md, say) — nothing to open here
+      a.setAttribute("href", "#");
+      a.setAttribute("title", "Local file, not in the portal");
+      a.style.opacity = ".55";
+    }
+  });
+
+  const shim = doc.createElement("script");
+  shim.textContent =
+    'document.addEventListener("click",function(e){' +
+    'var a=e.target.closest&&e.target.closest("a[data-xyz-go]");' +
+    'if(!a)return;e.preventDefault();' +
+    'parent.postMessage({type:"xyz-navigate",slug:a.getAttribute("data-xyz-go")},"*");});';
+  doc.body.appendChild(shim);
+
+  return "<!DOCTYPE html>" + doc.documentElement.outerHTML;
 }
 
 async function loadDashboard(){
@@ -222,7 +344,12 @@ async function loadDashboard(){
       (page.slug === DEFAULT_SLUG ? "" : '<br><br><a href="#/'+DEFAULT_SLUG+'" style="color:#3769BE">← back to the dashboard</a>');
     return;
   }
-  const html = await data.text();
+  let html = await data.text();
+  if(page.file.indexOf("/") !== -1){          // lives in a folder => may have assets
+    load.textContent = "Resolving assets…";
+    try{ html = await resolveAssets(html, page.file); }
+    catch(e){ /* fall back to the raw page rather than showing nothing */ }
+  }
   frame.srcdoc = html;
   frame.onload = function(){
     load.style.display = "none";
