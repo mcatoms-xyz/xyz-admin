@@ -42,6 +42,11 @@
   .bar button{ width:auto; margin:0; padding:6px 12px; font-size:12.5px; font-weight:600;
                background:transparent; border:1px solid var(--line); color:var(--text); }
   .bar .brand{ font-size:13px; font-weight:800; letter-spacing:.4px; }
+  #pagenav{ display:flex; gap:2px; flex-wrap:wrap; margin-left:6px; }
+  #pagenav a{ font-size:12.5px; color:var(--dim); text-decoration:none; padding:5px 10px;
+              border-radius:7px; white-space:nowrap; }
+  #pagenav a:hover{ color:var(--text); background:rgba(255,255,255,.06); }
+  #pagenav a.on{ color:#fff; background:var(--blueprint); font-weight:700; }
   .dot{ width:8px; height:8px; border-radius:50%; background:var(--ok); }
   #frame{ flex:1 1 auto; width:100%; border:0; background:#fff; }
   #loading{ padding:40px; text-align:center; color:var(--dim); font-size:14px; }
@@ -72,6 +77,7 @@
   <div class="bar">
     <div class="dot"></div>
     <div class="brand">XYZ GAME LABS · INTERNAL</div>
+    <nav id="pagenav"></nav>
     <div class="who">Signed in as <b id="whoami">—</b></div>
     <button id="reloadBtn" type="button">Reload</button>
     <button id="signOutBtn" type="button">Sign out</button>
@@ -98,7 +104,33 @@ const SUPABASE_URL    = "https://ingppffghqsajdrgahcm.supabase.co";
 const PUBLISHABLE_KEY = "sb_publishable__41r1k47DJnKmtbmVNqYKQ_yOL98eTd";
 const STAFF_DOMAIN    = "@xyzgamelabs.com";
 const BUCKET          = "xyz-admin";
-const OBJECT          = "dashboard.html";
+
+/* ---------------- the portal's page registry ----------------------------
+   Every page served by admin.xyzgamelabs.com is listed here. Adding one
+   means: add a row, then publish the file into the bucket under `file`
+   (ops/tools/xyz-backup.sh publish handles both from PORTAL_PAGES).
+   `nav:true` puts it in the top bar; everything else is reachable by link
+   from inside a page, via #/<slug>.
+   ⚠️ Keep this list in step with PORTAL_PAGES in xyz-backup.sh. The script
+   warns when the two drift.                                              */
+const PAGES = [
+  { slug:"dashboard",  file:"dashboard.html",              label:"Dashboard",  nav:true },
+  { slug:"conventions",file:"conventions.html",            label:"Conventions",nav:true },
+  { slug:"lys",        file:"lys-campaign-case.html",      label:"LYS Case",   nav:true },
+  { slug:"retail",     file:"archravels-retail-overview.html", label:"Retail", nav:true },
+  { slug:"backers",    file:"backer-command.html",         label:"Backers",    nav:true },
+  { slug:"roadmap",    file:"release-roadmap.html",        label:"AR Roadmap", nav:true },
+  { slug:"backer-lookup", file:"backer-lookup.html",       label:"Backer lookup", nav:false },
+];
+const DEFAULT_SLUG = "dashboard";
+function pageFor(slug){
+  for(var i=0;i<PAGES.length;i++){ if(PAGES[i].slug===slug) return PAGES[i]; }
+  return null;
+}
+function currentSlug(){
+  var m = /^#\/([a-z0-9-]+)/i.exec(location.hash || "");
+  return (m && pageFor(m[1])) ? m[1] : DEFAULT_SLUG;
+}
 
 const sb = window.supabase.createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
   auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }
@@ -155,22 +187,39 @@ function reveal(email){
   $("gate").style.display  = "none";
   $("shell").style.display = "flex";
   $("whoami").textContent  = email;
-  if(history.replaceState) history.replaceState(null,"",location.origin+location.pathname);
+  // Strip Supabase's auth fragment but KEEP our own #/route — replacing the whole
+  // URL here used to knock the portal back to the dashboard on every sign-in.
+  if(history.replaceState){
+    var keep = /^#\/[a-z0-9-]+/i.test(location.hash || "") ? location.hash : "";
+    history.replaceState(null, "", location.origin + location.pathname + keep);
+  }
   loadDashboard();
 }
 
 /* ---------------- the gated payload ---------------- */
+function renderNav(){
+  const nav = $("pagenav"); if(!nav) return;
+  const cur = currentSlug();
+  nav.innerHTML = PAGES.filter(function(p){ return p.nav; }).map(function(p){
+    return '<a href="#/'+p.slug+'"'+(p.slug===cur?' class="on"':'')+'>'+esc(p.label)+'</a>';
+  }).join("");
+}
+
 async function loadDashboard(){
   const load = $("loading"), frame = $("frame");
+  const page = pageFor(currentSlug()) || pageFor(DEFAULT_SLUG);
+  renderNav();
   frame.style.display = "none";
   load.style.display  = "block";
-  load.textContent    = "Fetching dashboard…";
+  load.textContent    = "Fetching " + page.label + "…";
 
-  const { data, error } = await sb.storage.from(BUCKET).download(OBJECT);
+  const { data, error } = await sb.storage.from(BUCKET).download(page.file);
   if(error){
-    load.innerHTML = "Could not load the dashboard.<br><small>" + esc(error.message) +
-      "</small><br><br><small>If this says 'Object not found', the dashboard has not been " +
-      "uploaded to the <b>" + esc(BUCKET) + "</b> bucket yet.</small>";
+    load.innerHTML = "Could not load <b>" + esc(page.label) + "</b>.<br><small>" + esc(error.message) +
+      "</small><br><br><small>If this says 'Object not found', <code>" + esc(page.file) +
+      "</code> has not been published to the <b>" + esc(BUCKET) + "</b> bucket yet. " +
+      "Run <code>ops/tools/xyz-backup.sh publish</code>.</small>" +
+      (page.slug === DEFAULT_SLUG ? "" : '<br><br><a href="#/'+DEFAULT_SLUG+'" style="color:#3769BE">← back to the dashboard</a>');
     return;
   }
   const html = await data.text();
@@ -203,8 +252,18 @@ async function pushSessionToFrame(){
 }
 
 // The dashboard asks on boot too, in case it finished loading before we pushed.
+// It also asks us to navigate: pages inside the sandboxed frame cannot change
+// the parent's hash themselves, so they post {type:"xyz-navigate", slug}.
 window.addEventListener("message", function(e){
-  if(e.data && e.data.type === "xyz-session-request") pushSessionToFrame();
+  if(!e.data) return;
+  if(e.data.type === "xyz-session-request") pushSessionToFrame();
+  if(e.data.type === "xyz-navigate" && pageFor(e.data.slug)){
+    location.hash = "#/" + e.data.slug;
+  }
+});
+
+window.addEventListener("hashchange", function(){
+  if($("shell").style.display === "flex") loadDashboard();
 });
 
 // Supabase rotates the access token roughly hourly. Without this the Inbox
