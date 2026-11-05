@@ -130,6 +130,8 @@ const PAGES = [
   { slug:"hs-catchup", file:"hindsight/rick-catchup.html", label:"Rick catch-up",       nav:false },
   // Curiosities: a small site built by 6 - Curios/build_portal.py (docs, prototype, card art gallery).
   { slug:"curios",     file:"curios/index.html",           label:"Curiosities", nav:true, prefix:"curios/" },
+  // Packing: ops/shipping mirrored as a folder; PDFs open in a new tab via signed URLs.
+  { slug:"packing",    file:"shipping/index.html",         label:"Packing",     nav:true, prefix:"shipping/" },
 ];
 const DEFAULT_SLUG = "dashboard";
 function pageFor(slug){
@@ -289,6 +291,22 @@ async function resolveAssets(html, objPath){
       const { data } = await sb.storage.from(BUCKET).createSignedUrls(paths, 3600);
       if(data) data.forEach(function(row, i){ if(row && row.signedUrl) imgs[i].src = row.signedUrl; });
     }catch(e){ /* images just won't render */ }
+  }
+
+  // PDFs -> signed URLs, opened in a new tab (the frame allows escaping popups)
+  const pdfs = [];
+  doc.querySelectorAll("a[href]").forEach(function(a){
+    const h = a.getAttribute("href");
+    if(isBare(h) && /\.pdf$/i.test(h.split("#")[0].split("?")[0])) pdfs.push(a);
+  });
+  if(pdfs.length){
+    const paths = pdfs.map(function(a){ return new URL(base + a.getAttribute("href").split("#")[0].split("?")[0], "https://x/").pathname.slice(1); });
+    try{
+      const { data } = await sb.storage.from(BUCKET).createSignedUrls(paths, 3600);
+      if(data) data.forEach(function(row, i){
+        if(row && row.signedUrl){ pdfs[i].href = row.signedUrl; pdfs[i].target = "_blank"; pdfs[i].rel = "noopener"; }
+      });
+    }catch(e){ /* links fall through to the disabled state below */ }
   }
 
   // internal links -> gate navigation
