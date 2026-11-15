@@ -49,6 +49,27 @@
   #pagenav a.on{ color:#fff; background:var(--blueprint); font-weight:700; }
   .dot{ width:8px; height:8px; border-radius:50%; background:var(--ok); }
   #frame{ flex:1 1 auto; width:100%; border:0; background:#fff; }
+
+  /* ---------- phone: slim bar, menu on tap, can be tucked away ---------- */
+  #curLabel, #menuBtn, #hideBtn, #showBar{ display:none; }
+  #shell.barhidden .bar{ display:none; }
+  #shell.barhidden #showBar{ display:block; }
+  #showBar{ position:fixed; top:0; left:50%; transform:translateX(-50%); z-index:10;
+            width:auto; margin:0; padding:2px 14px 4px; font-size:11.5px; font-weight:700;
+            border-radius:0 0 10px 10px; background:rgba(26,32,41,.92); color:var(--dim);
+            border:1px solid var(--line); border-top:0; }
+  @media (max-width:760px){
+    .bar{ flex-wrap:wrap; gap:8px; padding:6px 10px; }
+    .bar .brand{ display:none; }
+    #curLabel{ display:block; font-size:13.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1 1 auto; }
+    #menuBtn, #hideBtn{ display:inline-block; padding:5px 11px; }
+    .bar:not(.open) #pagenav, .bar:not(.open) .who, .bar:not(.open) #reloadBtn, .bar:not(.open) #signOutBtn{ display:none; }
+    .bar.open #pagenav{ order:10; width:100%; margin:4px 0 0; gap:4px; }
+    .bar.open #pagenav a{ padding:8px 12px; font-size:14px; background:rgba(255,255,255,.04); }
+    .bar.open #pagenav a.on{ background:var(--blueprint); }
+    .bar.open .who{ order:11; width:100%; margin:4px 0 0; }
+    .bar.open #reloadBtn, .bar.open #signOutBtn{ order:12; }
+  }
   #loading{ padding:40px; text-align:center; color:var(--dim); font-size:14px; }
 </style>
 </head>
@@ -74,14 +95,18 @@
 
 <!-- ============ SHELL ============ -->
 <div id="shell">
-  <div class="bar">
+  <div class="bar" id="bar">
     <div class="dot"></div>
     <div class="brand">XYZ GAME LABS · INTERNAL</div>
+    <div id="curLabel"></div>
     <nav id="pagenav"></nav>
     <div class="who">Signed in as <b id="whoami">—</b></div>
     <button id="reloadBtn" type="button">Reload</button>
     <button id="signOutBtn" type="button">Sign out</button>
+    <button id="menuBtn" type="button" aria-expanded="false">Menu</button>
+    <button id="hideBtn" type="button" title="Hide this bar">Hide</button>
   </div>
+  <button id="showBar" type="button" title="Show the menu bar">&#9662; Menu</button>
   <div id="loading">Fetching dashboard…</div>
   <iframe id="frame" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" style="display:none"></iframe>
 </div>
@@ -199,6 +224,22 @@ $("signOutBtn").addEventListener("click", async function(){
 });
 $("reloadBtn").addEventListener("click", loadDashboard);
 
+/* ---------------- phone menu: open/close, and tuck the bar away ---------------- */
+function setMenu(open){
+  $("bar").classList.toggle("open", open);
+  $("menuBtn").setAttribute("aria-expanded", open ? "true" : "false");
+  $("menuBtn").textContent = open ? "Close" : "Menu";
+}
+function setBarHidden(hidden){
+  $("shell").classList.toggle("barhidden", hidden);
+  try{ localStorage.setItem("xyz-bar-hidden", hidden ? "1" : "0"); }catch(e){}
+}
+$("menuBtn").addEventListener("click", function(){ setMenu(!$("bar").classList.contains("open")); });
+$("pagenav").addEventListener("click", function(e){ if(e.target.closest("a")) setMenu(false); });
+$("hideBtn").addEventListener("click", function(){ setMenu(false); setBarHidden(true); });
+$("showBar").addEventListener("click", function(){ setBarHidden(false); });
+try{ if(localStorage.getItem("xyz-bar-hidden") === "1") $("shell").classList.add("barhidden"); }catch(e){}
+
 /* ---------------- boot ---------------- */
 async function boot(){
   const { data } = await sb.auth.getSession();
@@ -229,6 +270,8 @@ function reveal(email){
 function renderNav(){
   const nav = $("pagenav"); if(!nav) return;
   const cur  = currentSlug();
+  const curPage = pageFor(cur);
+  if($("curLabel")) $("curLabel").textContent = curPage ? curPage.label : "";
   const root = cur.indexOf("/") > 0 ? cur.slice(0, cur.indexOf("/")) : cur;
   nav.innerHTML = PAGES.filter(function(p){ return p.nav; }).map(function(p){
     return '<a href="#/'+p.slug+'"'+(p.slug===root?' class="on"':'')+'>'+esc(p.label)+'</a>';
