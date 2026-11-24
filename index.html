@@ -142,10 +142,10 @@ const BUCKET          = "xyz-admin";
 const PAGES = [
   { slug:"dashboard",  file:"dashboard.html",              label:"Dashboard",  nav:true },
   { slug:"conventions",file:"conventions.html",            label:"Conventions",nav:true },
-  { slug:"lys",        file:"lys-campaign-case.html",      label:"LYS Case",   nav:true },
+  { slug:"lys",        file:"lys-campaign-case.html",      label:"LYS Case",   nav:false },
   { slug:"retail",     file:"archravels-retail-overview.html", label:"Retail", nav:true },
-  { slug:"backers",    file:"backer-command.html",         label:"Backers",    nav:true },
-  { slug:"roadmap",    file:"release-roadmap.html",        label:"AR Roadmap", nav:true },
+  { slug:"backers",    file:"backer-command.html",         label:"Backers",    nav:false },
+  { slug:"roadmap",    file:"release-roadmap.html",        label:"AR Roadmap", nav:false },
   // `prefix` = this page is a small SITE. Any .html under its folder is servable,
   // addressed as #/<slug>/<path-without-.html>, e.g. #/hindsight/world. Without
   // this every one of the bible's 13 sibling pages would need its own registry
@@ -160,7 +160,7 @@ const PAGES = [
   // Packing: ops/shipping mirrored as a folder; PDFs open in a new tab via signed URLs.
   { slug:"packing",    file:"shipping/index.html",         label:"Packing",     nav:true, prefix:"shipping/" },
   // Holiday: BackerKit Holiday Market working pages (image review), mirrored from marketing/bk-holiday-market-2026/_portal.
-  { slug:"holiday",    file:"holiday/index.html",          label:"Holiday",     nav:true, prefix:"holiday/" },
+  { slug:"holiday",    file:"holiday/index.html",          label:"Holiday",     nav:false, prefix:"holiday/" },
   // 24-month plan: ops/plan mirrored as plan/.
   { slug:"plan",       file:"plan/index.html",             label:"24-Month Plan", nav:true, prefix:"plan/" },
 ];
